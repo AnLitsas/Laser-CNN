@@ -1,0 +1,26 @@
+name: lasercnn
+channels:
+  - pytorch
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.8
+  - numpy
+  - pandas
+  - matplotlib
+  - scipy
+  - scikit-learn
+  - cudatoolkit
+  - pillow
+  - openpyxl
+  - pip
+  - pip:
+    - torch
+    - torchvision
+    - torchaudio
+    - torchsummary
+    - opencv-python
+    - scikit-image
+    - tqdm
+    - seaborn
+    - plotly
