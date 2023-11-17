@@ -2,9 +2,6 @@ from torch.utils.data import Dataset
 from torchvision import transforms
 from PIL import Image
 import pandas as pd
-
-
-
 '''
         The presented code defines a more advanced custom PyTorch Dataset subclass named MyDataset.
         It is engineered to load and preprocess data for a machine learning task, with multiple pre-processing options.

@@ -1,5 +1,5 @@
-''' 
-Regression Model for predicting values of the meterial properties of the images
+'''
+Regression Model for predicting values of the material properties from images.
 '''
 from utils import load_dataset, create_model, log_transform, inverse_log_transform, create_dir, plot_losses
 from torch.utils.data import DataLoader
@@ -12,6 +12,23 @@ import torch
 
 
 def train_model(model, optimizer, loss_function, training_dataset, validation_dataset, epochs, batch_size, device, label_name):
+    '''
+    Trains the regression model on the provided datasets.
+    
+    Args:
+        model: The neural network model to be trained.
+        optimizer: The optimization algorithm used for updating model weights.
+        loss_function: The loss function used to measure model performance.
+        training_dataset: The dataset used for training the model.
+        validation_dataset: The dataset used for validating the model.
+        epochs: The number of training cycles through the dataset.
+        batch_size: The number of samples in each batch.
+        device: The device (CPU/GPU) on which to perform training.
+        label_name: The name of the label being predicted.
+    
+    Returns:
+        The trained model and lists containing the training and validation losses for each epoch.
+    '''
     
     training_length = len(training_dataset)
     iterations = training_length//batch_size
@@ -19,69 +36,55 @@ def train_model(model, optimizer, loss_function, training_dataset, validation_da
     validation_losses = []
     training_losses = []
     
+    # Training loop for each epoch
     for epoch in range(epochs):
         epoch_train_loss = 0
         epoch_validation_loss = 0
-        # Reset the dataloader for each epoch
         training_dataloader = DataLoader(training_dataset, batch_size = batch_size, shuffle = True)
+        
+        # Iterating through the training dataset
         for iter, i in enumerate(range(0, training_length, batch_size)): 
             print(f'Epoch: {epoch+1}/{epochs} \t Iteration: {iter+1}/{iterations}', end='\r')
-            # Get new batch of data
+            
+            # Fetching the batch
             batch_X, batch_y = next(training_dataloader.__iter__()) 
-            batch_y = batch_y.to(device)
-            #RuntimeError: Found dtype Double but expected Float
-            batch_y = batch_y.float()
-            # make batch_y [batch_size, 1]
-            batch_y = batch_y.reshape(-1, 1)
+            batch_y = batch_y.to(device).float().reshape(-1, 1)
 
-            ###############################################################
-            # Transform the labels
-            ###############################################################
+            # Optional label transformation (e.g., log transformation)
             if label_name == 'np':
                 batch_y = log_transform(batch_y)
             
             batch_X = (batch_X.float()/255).to(device)
             
-            ###############################################################
-            # Forward pass
-            ###############################################################
+            # Forward pass: Computing model outputs and loss
             model.zero_grad()
             outputs = model(batch_X)
             loss = loss_function(outputs, batch_y)             
             
-            ###############################################################
-            # Backward pass
-            ###############################################################
+            # Backward pass: Computing gradients and updating weights
             loss.backward()
             epoch_train_loss += loss.item()
             optimizer.step()
 
-        
+        # Validation phase, no gradient calculations needed
         with torch.no_grad():
             validation_dataloader = DataLoader(validation_dataset, batch_size = batch_size, shuffle = True, pin_memory=True)
             validation_length = len(validation_dataset)
+            
+            # Iterating through the validation dataset
             for iter, i in enumerate(range(0, validation_length, batch_size)):
                 val_batch_X, val_batch_y = next(validation_dataloader.__iter__())
-                ###############################################################
-                # Transform the labels
-                ###############################################################
-                val_batch_y = val_batch_y.to(device)
-                val_batch_y = val_batch_y.reshape(-1, 1)
+                val_batch_y = val_batch_y.to(device).reshape(-1, 1)
+                
                 if label_name == 'np':
                     val_batch_y = log_transform(val_batch_y)
                 
-                #val_batch_X = val_batch_X.unsqueeze(1)
                 val_batch_X = (val_batch_X.float()/255).to(device)
-                # Get the output
                 val_outputs = model(val_batch_X)
-                # Get the loss
                 val_loss = loss_function(val_outputs, val_batch_y)
-                # Add the loss to the epoch loss
                 epoch_validation_loss += val_loss.item()
-                # Delete unnecessary variables
-                del val_batch_X, val_batch_y, val_outputs, val_loss
                 
-        # Get the average loss for the epoch
+        # Calculating and storing average losses for the epoch
         training_loss = epoch_train_loss / (training_length//batch_size)
         training_losses.append(training_loss)
         validation_loss = epoch_validation_loss / (validation_length//batch_size)
@@ -91,49 +94,50 @@ def train_model(model, optimizer, loss_function, training_dataset, validation_da
 
 
 def test_model(model, testing_dataset,batch_size, device, label_name):
+    '''
+    Tests the regression model on the provided dataset and computes the mean loss.
+
+    Args:
+        model: The trained neural network model.
+        testing_dataset: The dataset used for testing the model.
+        batch_size: The number of samples in each test batch.
+        device: The device (CPU/GPU) on which to perform testing.
+        label_name: The name of the label being predicted.
+
+    Returns:
+        A DataFrame with actual and predicted values, and the mean testing loss.
+    '''
+    
     iterations = len(testing_dataset)//batch_size
     testing_length = len(testing_dataset)
-    # create a pandas dataframe to store the results
-    # The dataframe will have 2 columns: 
-    # 1. The predicted angle
-    # 2. The actual angle
-    # The rows will be the number of iterations
-    # The dataframe will be saved as a csv file
+    
     testing_results = pd.DataFrame(columns = ['actual_value', 'predicted_value'])
     testing_loss = 0
     test_i = 0
     testing_dataloader = DataLoader(testing_dataset, batch_size = batch_size, shuffle = True, pin_memory=True)
+    
     with torch.no_grad():
+        # Iterating through the testing dataset
         for iter, i in enumerate(range(0, testing_length, batch_size)):
             print(f'Iteration: {iter}/{iterations}', end='\r')
             batch_X, batch_y = next(testing_dataloader.__iter__())
-            batch_y = batch_y.to(device)
-            batch_y = batch_y.float()
-            batch_y = batch_y.reshape(-1, 1)
-            ###############################################################
-            # Transform the labels
-            ###############################################################
+            batch_y = batch_y.to(device).float().reshape(-1, 1)
+            
+            # Applying any necessary transformation to the labels
             if label_name == 'np':
                 batch_y = log_transform(batch_y)
 
-            #batch_X = batch_X.unsqueeze(1)
             batch_X = (batch_X.float()/255).to(device)
             outputs = model(batch_X)
-            
-            loss = loss_function(outputs, batch_y)
-            # loss to double
-            loss = loss.double()
+            loss = loss_function(outputs, batch_y).double()
             testing_loss += loss.item()
             
-            
-            ###############################################################
-            # Inverse transform the outputs and the labels
-            ###############################################################
+            # Reversing the transformation for output values if applied
             if label_name == 'np':
                 outputs = inverse_log_transform(outputs)
                 batch_y = inverse_log_transform(batch_y)
-                
-            # Add the results to the dataframe
+            
+            # Storing each prediction and actual value in the DataFrame
             tmp = outputs.cpu().numpy()
             for j in range(tmp.shape[0]):
                 testing_results.loc[test_i, 'predicted_value'] = outputs.cpu().numpy()[j]
@@ -225,7 +229,7 @@ if __name__ == '__main__':
         model = create_model(activation_func, dropout_strength).to(device)
         
         # Choose optimizer and loss function
-        optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)#.to(device)
+        optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
         
         # Load the dataset
         training_dataset, testing_dataset, validation_dataset, iterations, _  = load_dataset(training_data_path, testing_data_path, validation_data_path, 
@@ -242,7 +246,7 @@ if __name__ == '__main__':
         c_v_predictions_and_actual_list.append(testing_results)
         c_v_loss_list.append(testing_loss)
         # Plot the loss
-        plot_losses(training_loss, validation_loss, xlabel = 'Epoch', ylabel = 'Mean Squared Error', title = 'Regression Loss', path_to_save=validation_path)
+        plot_losses(training_loss, validation_loss, xlabel = 'Epoch', ylabel = 'Mean Squared Error', title = 'Regression Loss', path_to_save = validation_path)
         
         print(f'\nCross validation {i+1} testing loss: {testing_loss}')
     

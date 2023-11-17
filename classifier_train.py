@@ -15,170 +15,187 @@ import os
                  
 
 def train_model(model, optimizer, loss_function, training_dataset, validation_dataset, epochs, batch_size, device, label_encoder):
-    training_length = len(training_dataset)
+    '''
+    Trains the classifier model on the given dataset.
 
+    Args:
+        model: The neural network model to be trained.
+        optimizer: The optimization algorithm.
+        loss_function: The loss function to be used for training.
+        training_dataset: Dataset for training the model.
+        validation_dataset: Dataset for validating the model.
+        epochs: Number of training epochs.
+        batch_size: Size of each data batch.
+        device: Device to perform computations on (CPU/GPU).
+        label_encoder: Encoder for converting labels to and from categorical format.
+
+    Returns:
+        model: The trained model.
+        training_losses: List of training losses per epoch.
+        validation_losses: List of validation losses per epoch.
+    '''
+    
+    # Initializing variables for training
+    training_length = len(training_dataset)
     iterations = training_length//batch_size
     validation_losses = []
     training_losses = []
+    
+    # Training loop for each epoch
     for epoch in range(epochs):
         epoch_train_loss = 0
         epoch_validation_loss = 0
         training_dataloader = DataLoader(training_dataset, batch_size = batch_size, shuffle = True)
+        
+        # Iterating through the training dataset
         for iter, i in enumerate(range(0, training_length, batch_size)):
-            # print in the same line
             print(f'Epoch: {epoch}, iteration: {iter}/{iterations}', end='\r')
 
-            # Get the batch
+            # Fetching the batch
             batch_X, batch_y = next(training_dataloader.__iter__()) 
 
-            ###############################################################
-            # Encode the categorical labels
-            ###############################################################
-            
+            # Encoding categorical labels for the batch            
             batch_y = encode_categorical_labels(list(batch_y), label_encoder)
-            
             batch_y = torch.from_numpy(batch_y).long()
             batch_y = torch.nn.functional.one_hot(batch_y, num_classes=3).to(device)
             
-            
-            # print(batch_y)
-
+            # Normalizing and transferring batch to device
             batch_X = (batch_X.float()/255).to(device)
 
-            ###############################################################
-            # Forward pass
-            ###############################################################
+            # Forward pass: Computing model outputs and loss
             model.zero_grad()
             outputs = model(batch_X)
             loss = loss_function(outputs, torch.max(batch_y, 1)[1])       
-            # print(f'outputs: {outputs}')
-            # predicted= torch.max(outputs.data, 1)[1]
-            # print(f'Predicted: {predicted}')
-            # print(f'Decoded: {decode_categorical_labels(predicted, label_encoder)}')  
             
-            # reversed_batch_y = torch.max(batch_y, 1)[1]
-            # predicted_reversed = decode_categorical_labels(reversed_batch_y, label_encoder)
-            # print(f'Predicted reversed: {reversed_batch_y}')
-            # print(f'Decoded reversed: {predicted_reversed}')
-            # sys.exit()
-            ###############################################################
-            # Backward pass
-            ###############################################################
+            # Backward pass: Computing gradients and updating weights
             loss.backward()
             epoch_train_loss += loss.item()
             optimizer.step()
             
-            # Print first convolutional layer weights grads
-            
-            # Delete unnecessary variables
-            del batch_X, batch_y, outputs, loss
-            
-            # Use the validation set to check the accuracy without updating the weights
 
-        # No training
+        # Validation phase, no gradient calculations needed
         with torch.no_grad():
             validation_dataloader = DataLoader(validation_dataset, batch_size = batch_size, shuffle = True, pin_memory=True)            
             validation_length = len(validation_dataset)
+            
+            # Iterating through the validation dataset
             for iter, i in enumerate(range(0, validation_length, batch_size)):
                 val_batch_X, val_batch_y = next(validation_dataloader.__iter__())
-                ###############################################################
-                # Encode the categorical labels
-                ###############################################################
+                
+                # Encoding categorical labels for validation batch
                 val_batch_y = encode_categorical_labels(list(val_batch_y), label_encoder)
                 val_batch_y = torch.from_numpy(val_batch_y).long()
                 val_batch_y = torch.nn.functional.one_hot(val_batch_y, num_classes=3).to(device)
                 
+                # Normalizing and transferring validation batch to device
                 val_batch_X = (val_batch_X.float()/255).to(device)
-                # Get the output
-                val_outputs = model(val_batch_X)
-                # Get the loss
-                val_loss = loss_function(val_outputs, torch.max(val_batch_y, 1)[1])
-                # Add the loss to the epoch loss
-                epoch_validation_loss += val_loss.item()
-                # Delete unnecessary variables
-                del val_batch_X, val_batch_y, val_outputs, val_loss
-            
                 
+                # Model inference on validation batch
+                val_outputs = model(val_batch_X)
+                val_loss = loss_function(val_outputs, torch.max(val_batch_y, 1)[1])
+                
+                # Accumulating validation loss
+                epoch_validation_loss += val_loss.item()
             
-        # Get the average loss for the epoch
+        # Calculating and storing average losses for the epoch
         training_loss = epoch_train_loss / (training_length//batch_size)
         training_losses.append(training_loss)
         validation_loss = epoch_validation_loss / (validation_length//batch_size)
         validation_losses.append(validation_loss)
-        #print(f"Epoch: {epoch}. Loss: {training_loss}. Validation loss: {validation_loss}")
+
     return model, training_losses, validation_losses
 
-def test_model(model,  training_dataset, testing_dataset, validation_dataset,batch_size, device, label_encoder):
+def test_model(model, testing_dataset, batch_size, device, label_encoder):
+    '''
+    Tests the trained classifier model on the testing dataset.
+
+    Args:
+        model: The trained neural network model.
+        testing_dataset: Dataset for testing the model.
+        batch_size: Size of each data batch.
+        device: Device to perform computations on (CPU/GPU).
+        label_encoder: Encoder for converting labels to and from categorical format.
+
+    Returns:
+        accuracy_test: Accuracy of the model on the testing dataset.
+        missclassified_test: Details of misclassified instances.
+        confusion_mtx: Confusion matrix of the model predictions.
+        prediction_types: Predicted labels.
+        real_types: Actual labels.
+    '''
+    # Initialize variables for testing
     iterations = len(testing_dataset)//batch_size
     testing_length = len(testing_dataset)
-
+    
+    # Retrieve class labels
     classes = get_classes(label_encoder)
     missclassified_test = {c: {'predicted_label': [], 'image': []} for c in classes}
     counted_classes = {c: 0 for c in classes}
-    #missclassified_train = {c: {'predicted_label': None, 'image': None} for c in classes}
-    # Test the model
-    
+
+    # Initialize confusion matrix
     confusion_mtx = np.zeros((3, 3)) 
     
+    # Lists for storing predictions and actual labels
     prediction_types = []
     real_types = []
     
+    # Variables for tracking accuracy
     correct = 0
     total = 0
+    
+    # DataLoader for testing
     testing_dataloader = DataLoader(testing_dataset, batch_size = batch_size, shuffle = True, pin_memory=True)
+    
+    # Begin testing - no gradient calculations
     with torch.no_grad():
         for iter, i in enumerate(range(0, testing_length, batch_size)):
-            # print in the same line
             print(f'Iteration: {iter}/{iterations}', end='\r')
-            #print(f'Iteration: {iter}/{len(testing_data)//batch_size}', end='\r')
-            # Get the batch
+            
+            # Get the current batch
             batch_X, batch_yy = next(testing_dataloader.__iter__())
-            ###############################################################
-            # Encode the categorical labels
-            ###############################################################
-            #batch_y = batch_y.to(device)
+            
+            # Encode labels to categorical format
             batch_y = encode_categorical_labels(list(batch_yy), label_encoder)
             batch_y = torch.from_numpy(batch_y).long()
             batch_y = torch.nn.functional.one_hot(batch_y, num_classes=3).to(device)
             
-            
+            # Normalize and transfer batch to device
             batch_X = (batch_X.float()/255).to(device)
-            # Get the output
-            outputs = model(batch_X)
-            # Get the predicted class
-            predicted = torch.max(outputs.data, 1)[1] #torch.argmax(testing_labels[i])
-            # Get the real class
-            real = torch.max(batch_y, 1)[1] #model(testing_data[i].view(-1, 1, 512, 512))[0]
             
-            ##############################################################
-            # UPDATE CONFUSION MATRIX
+            # Model inference
+            outputs = model(batch_X)
+           
+            # Determine predicted and actual classes
+            predicted = torch.max(outputs.data, 1)[1] 
+            real = torch.max(batch_y, 1)[1] 
+            
+            # Update confusion matrix
             real_np = real.cpu().numpy()
             predicted_np = predicted.cpu().numpy()
             confusion_mtx += confusion_matrix(real_np, predicted_np, labels=np.arange(3))
-            ##############################################################
             
-            # Add the number of correct predictions
+            # Update correct and total counts
             correct += (predicted == real).sum().item()
-            # Add the total number of predictions
             total += batch_y.size(0)            
 
-            # Decode the labels
+            # Decode the labels to original format
             dec_batch_y = decode_categorical_labels(real, label_encoder)
             dec_predicted = decode_categorical_labels(predicted, label_encoder)
 
+            # Store predictions and actual labels
             prediction = np.array(dec_predicted).flatten()
             prediction_types.append(prediction)
-            
             batch_y = np.array(list(batch_yy)).flatten()
             real_types.append(batch_yy)
             
+            # Track misclassified cases
             for i, (p, r) in enumerate(zip(dec_predicted, dec_batch_y)):
-                # Count how many classes r are in the test set
                 counted_classes[r] += 1
                 if p != r:
                     missclassified_test[r]['predicted_label'].append(p)
                     missclassified_test[r]['image'].append(batch_X[i])  
-            
+    
+    # Calculate final accuracy         
     accuracy_test = round(correct/total, 3)
     
     return accuracy_test, missclassified_test, confusion_mtx, prediction_types, real_types
@@ -186,6 +203,8 @@ def test_model(model,  training_dataset, testing_dataset, validation_dataset,bat
 
 
 if __name__ == '__main__':
+    # Main script execution
+    # Includes argument parsing, model initialization, training, testing, and result visualization
     if torch.cuda.is_available():
         # Use GPU
         print("Using GPU")
@@ -252,7 +271,7 @@ if __name__ == '__main__':
         torch.save(model.state_dict(), validation_path +'/model.pt')
         
         # Test the model
-        accuracy_test, missclassified_test, confusion_mtx, prediction_types, real_types = test_model(model, training_dataset, testing_dataset, validation_dataset, batch_size, device, label_encoder)
+        accuracy_test, missclassified_test, confusion_mtx, prediction_types, real_types = test_model(model, testing_dataset, batch_size, device, label_encoder)
         c_v_accuracy_list.append(accuracy_test)
         
         # Plot the loss
